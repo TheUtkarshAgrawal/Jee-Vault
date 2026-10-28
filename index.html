@@ -34,13 +34,17 @@ label.l{display:block;color:var(--mut);font-size:12px;text-transform:uppercase;l
 .im{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid var(--bd);cursor:zoom-in}
 .imgs.big{grid-template-columns:1fr}.imgs.big .im{aspect-ratio:auto;object-fit:contain;background:#000}
 .x{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;background:#000b;color:#fff;cursor:pointer}
-.up{display:inline-block}.up input{display:none}
+.up{display:inline-block;margin:0 6px 6px 0}.up input{display:none}
 .sec{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-top:14px}
 .sec h3{margin:0 0 8px;font-size:15px}
 .note{white-space:pre-wrap}
 #zoom{position:fixed;inset:0;background:#000e;z-index:9;display:none;align-items:center;justify-content:center;padding:8px}
 #zoom img{max-width:100%;max-height:100%}
 .top{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+#crop{position:fixed;inset:0;z-index:30;background:#000;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#crop .cs{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+#crop canvas{touch-action:none}
+#crop .bar{display:flex;gap:8px;padding:10px;justify-content:center;flex-wrap:wrap;background:var(--card)}
 </style></head>
 <body>
 <div class="wrap">
@@ -86,7 +90,7 @@ function list(){
   ${e.simgs.length||e.sol?'<span class="b" style="color:var(--ok)">Has solution</span>':''}</div></div></div>`).join(''):'<div class="empty">Nothing here yet.<br>Tap + to add your first entry.</div>';
 }
 const imgGrid=(arr,k,rm)=>arr.length?`<div class="imgs">${arr.map((s,i)=>`<div><img class="im" src="${s}" alt="">${rm?`<button class="x" data-a="rm" data-k="${k}" data-i="${i}">×</button>`:''}</div>`).join('')}</div>`:'';
-const upBtn=(k,w,txt)=>`<label class="btn up">${txt}<input type="file" accept="image/*" multiple data-k="${k}" data-w="${w}"></label>`;
+const upBtn=(k,w,txt)=>`<label class="btn up">📷 Take photo<input type="file" accept="image/*" capture="environment" data-k="${k}" data-w="${w}"></label><label class="btn up">🖼 Gallery<input type="file" accept="image/*" multiple data-k="${k}" data-w="${w}"></label>`;
 
 function sheet(){
  const el=document.getElementById('sheet');
@@ -150,11 +154,48 @@ document.addEventListener('input',ev=>{
 });
 document.addEventListener('change',async ev=>{
  const t=ev.target;if(t.type!=='file')return;
- const out=[];for(const f of t.files){const s=await comp(f);if(s)out.push(s)}
+ const out=[];for(const f of t.files){const s=await cropper(f);if(s)out.push(s)}
  const k=t.dataset.k,w=t.dataset.w;t.value='';
  if(w==='draft'&&S.draft){S.draft[k]=S.draft[k].concat(out);sheet()}
  else if(w==='detail'){const e=S.all.find(x=>x.id===S.view);if(e){e[k]=e[k].concat(out);await DB.put(e);await load();sheet()}}
 });
+function cropper(f){return new Promise(res=>{
+ const im=new Image(),u=URL.createObjectURL(f);
+ im.onerror=()=>{URL.revokeObjectURL(u);res(null)};
+ im.onload=()=>{
+  URL.revokeObjectURL(u);
+  let rot=0,r,m=null;
+  const base=document.createElement('canvas'),ov=document.createElement('div'),cv=document.createElement('canvas');
+  ov.id='crop';ov.innerHTML='<div class="cs"></div><div class="bar"><button class="btn" data-c="rot">↻ Rotate</button><button class="btn" data-c="rst">Reset</button><button class="btn" data-c="no">Cancel</button><button class="btn p" data-c="ok">✓ Save</button></div>';
+  ov.firstChild.appendChild(cv);document.body.appendChild(ov);
+  const cr=()=>[[r.x,r.y],[r.x+r.w,r.y],[r.x,r.y+r.h],[r.x+r.w,r.y+r.h]];
+  function draw(){const c=cv.getContext('2d'),k=cv.width/cv.getBoundingClientRect().width;c.drawImage(base,0,0);c.fillStyle='rgba(0,0,0,.55)';c.fillRect(0,0,cv.width,r.y);c.fillRect(0,r.y+r.h,cv.width,cv.height-r.y-r.h);c.fillRect(0,r.y,r.x,r.h);c.fillRect(r.x+r.w,r.y,cv.width-r.x-r.w,r.h);c.strokeStyle='#7c9cff';c.lineWidth=2*k;c.strokeRect(r.x,r.y,r.w,r.h);c.fillStyle='#7c9cff';for(const[x,y]of cr())c.fillRect(x-7*k,y-7*k,14*k,14*k)}
+  function setup(){
+   const s=Math.min(1,1600/Math.max(im.width,im.height)),w=im.width*s,h=im.height*s,q=rot%2;
+   base.width=q?h:w;base.height=q?w:h;
+   const x=base.getContext('2d');x.save();x.translate(base.width/2,base.height/2);x.rotate(rot*Math.PI/2);x.drawImage(im,-w/2,-h/2,w,h);x.restore();
+   cv.width=base.width;cv.height=base.height;
+   const f=Math.min((innerWidth-16)/base.width,(innerHeight-150)/base.height);
+   cv.style.width=base.width*f+'px';cv.style.height=base.height*f+'px';
+   r={x:0,y:0,w:base.width,h:base.height};draw()}
+  const pt=e=>{const b=cv.getBoundingClientRect(),k=cv.width/b.width;return[(e.clientX-b.left)*k,(e.clientY-b.top)*k,k]};
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+  cv.onpointerdown=e=>{const[x,y,k]=pt(e);cv.setPointerCapture(e.pointerId);const c=cr().find(p=>Math.hypot(p[0]-x,p[1]-y)<28*k);
+   if(c)m={t:'c',fx:c[0]===r.x?r.x+r.w:r.x,fy:c[1]===r.y?r.y+r.h:r.y};
+   else if(x>r.x&&x<r.x+r.w&&y>r.y&&y<r.y+r.h)m={t:'m',dx:x-r.x,dy:y-r.y};else m=null};
+  cv.onpointermove=e=>{if(!m)return;const[x,y]=pt(e),W=cv.width,H=cv.height;
+   if(m.t==='m'){r.x=cl(x-m.dx,0,W-r.w);r.y=cl(y-m.dy,0,H-r.h)}
+   else{const px=cl(x,0,W),py=cl(y,0,H);r.x=Math.min(px,m.fx);r.w=Math.max(20,Math.abs(px-m.fx));r.y=Math.min(py,m.fy);r.h=Math.max(20,Math.abs(py-m.fy))}
+   draw()};
+  cv.onpointerup=cv.onpointercancel=()=>{m=null};
+  ov.onclick=e=>{const a=e.target.dataset.c;if(!a)return;
+   if(a==='rot'){rot=(rot+1)%4;setup()}
+   else if(a==='rst'){r={x:0,y:0,w:base.width,h:base.height};draw()}
+   else if(a==='no'){ov.remove();res(null)}
+   else{const o=document.createElement('canvas');o.width=Math.round(r.w);o.height=Math.round(r.h);o.getContext('2d').drawImage(base,r.x,r.y,r.w,r.h,0,0,o.width,o.height);const d=o.toDataURL('image/jpeg',.85);ov.remove();res(d)}};
+  setup()};
+ im.src=u})}
+
 openDB().then(load);
 try{navigator.storage.persist()}catch(e){}
 try{navigator.serviceWorker.register("sw.js")}catch(e){}
