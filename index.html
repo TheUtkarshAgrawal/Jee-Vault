@@ -99,7 +99,7 @@ function sheet(){
   el.hidden=false;
   el.innerHTML=`<div class="wrap"><h1>${d.new?'New entry':'Edit entry'}</h1>
   <label class="l">Type</label><div class="row">${Object.entries(TYPES).map(([k,v])=>`<button class="chip ${d.type===k?'on':''}" data-a="dt" data-v="${k}">${v}</button>`).join('')}</div>
-  <label class="l">Subject</label><div class="row">${SUBJ.map(k=>`<button class="chip ${d.subj===k?'on':''}" data-a="ds" data-v="${k}">${k}</button>`).join('')}</div>
+  <label class="l">Subject</label><div class="row">${SUBJ.map(k=>`<button class="chip ${d.subj===k?'on':''}" data-a="ds" data-v="${k}">${k}</button>`).join('')}</div><div id="det" style="color:var(--mut);font-size:12px;margin:-4px 0 6px">${esc(d.dt||'')}</div>
   <label class="l">Title / topic</label><input data-f="title" value="${esc(d.title)}" placeholder="e.g. Rotational motion – rolling without slipping">
   <label class="l">Chapter</label><input data-f="chapter" value="${esc(d.chapter)}" placeholder="e.g. Mole concept">
   <label class="l">Notes ${d.type==='mistake'?'(why did I go wrong?)':d.type==='good'?'(why is it good?)':'(what exactly is my doubt?)'}</label><textarea data-f="notes">${esc(d.notes)}</textarea>
@@ -139,11 +139,11 @@ document.addEventListener('click',async ev=>{
  else if(a==='open'){S.view=t.dataset.id;S.del=false;sheet()}
  else if(a==='close'){S.view=null;S.del=false;sheet()}
  else if(a==='dt'){d.type=v;sheet()}
- else if(a==='ds'){d.subj=v;sheet()}
+ else if(a==='ds'){d.subj=v;d.manual=true;sheet()}
  else if(a==='rm'){d[t.dataset.k].splice(+t.dataset.i,1);sheet()}
  else if(a==='cancel'){S.draft=null;sheet()}
- else if(a==='save'){const e={...d};delete e.new;if(!e.title.trim())e.title=(e.chapter||'Untitled');await DB.put(e);S.draft=null;S.view=e.id;await load();sheet()}
- else if(a==='edit'){S.draft={...S.all.find(x=>x.id===S.view)};S.draft.qimgs=[...S.draft.qimgs];S.draft.simgs=[...S.draft.simgs];S.view=S.draft.id;sheet()}
+ else if(a==='save'){const e={...d};delete e.new;if(!e.manual&&!e.dt){const g=guess(e.title+' '+e.chapter+' '+e.notes,1);if(g)e.subj=g}delete e.manual;delete e.dt;if(!e.title.trim())e.title=(e.chapter||'Untitled');await DB.put(e);S.draft=null;S.view=e.id;await load();sheet()}
+ else if(a==='edit'){S.draft={...S.all.find(x=>x.id===S.view)};S.draft.manual=true;S.draft.qimgs=[...S.draft.qimgs];S.draft.simgs=[...S.draft.simgs];S.view=S.draft.id;sheet()}
  else if(a==='solved'){const e=S.all.find(x=>x.id===S.view);e.solved=!e.solved;await DB.put(e);await load();sheet()}
  else if(a==='del'){if(!S.del){S.del=true;sheet();return}await DB.del(S.view);S.view=null;S.del=false;await load();sheet()}
 });
@@ -156,7 +156,7 @@ document.addEventListener('change',async ev=>{
  const t=ev.target;if(t.type!=='file')return;
  const out=[];for(const f of t.files){const s=await cropper(f);if(s)out.push(s)}
  const k=t.dataset.k,w=t.dataset.w;t.value='';
- if(w==='draft'&&S.draft){S.draft[k]=S.draft[k].concat(out);sheet()}
+ if(w==='draft'&&S.draft){S.draft[k]=S.draft[k].concat(out);sheet();if(k==='qimgs'&&out.length&&!S.draft.manual)auto(S.draft,out[0])}
  else if(w==='detail'){const e=S.all.find(x=>x.id===S.view);if(e){e[k]=e[k].concat(out);await DB.put(e);await load();sheet()}}
 });
 function cropper(f){return new Promise(res=>{
@@ -195,6 +195,32 @@ function cropper(f){return new Promise(res=>{
    else{const o=document.createElement('canvas');o.width=Math.round(r.w);o.height=Math.round(r.h);o.getContext('2d').drawImage(base,r.x,r.y,r.w,r.h,0,0,o.width,o.height);const d=o.toDataURL('image/jpeg',.85);ov.remove();res(d)}};
   setup()};
  im.src=u})}
+
+const KW={
+Maths:'integral integration derivative differentiation limit matrix matrices determinant probability permutation combination binomial sequence progression parabola ellipse hyperbola conic locus trigonometric quadratic argand polynomial dx dy lim log sin cos tan cot sec vector_algebra straight_line complex_number differential_equation function domain',
+Physics:'velocity acceleration force newton friction momentum torque rotational inertia gravitation pendulum spring oscillation shm wave wavelength frequency doppler interference diffraction lens mirror refractive optics photon photoelectric electric_field charge coulomb capacitor capacitance current resistance resistor ohm circuit battery magnetic flux induction inductance emf solenoid heat calorimetry kinetic_theory radioactive semiconductor diode transistor projectile kg m/s tesla joule volt metre',
+IOC:'periodic_table coordination ligand crystal_field d-block f-block s-block p-block metallurgy ores hybridisation hybridization vsepr molecular_orbital ionic_bond covalent_bond halogen noble_gas hydride borax alum qualitative_analysis oxide lanthanoid actinoid',
+PC:'mole molarity molality normality stoichiometry equilibrium kc kp buffer ph ionic_equilibrium electrochemistry galvanic nernst conductivity rate_constant order_of_reaction activation_energy arrhenius enthalpy entropy gibbs colligative raoult osmotic atomic_structure bohr de_broglie ideal_gas van_der_waals adsorption redox solubility',
+OC:'alkane alkene alkyne benzene aromatic alcohol phenol ether aldehyde ketone carboxylic amine nitro haloalkane sn1 sn2 e1 e2 reagent isomer stereochemistry chiral enantiomer carbocation resonance inductive hyperconjugation polymer biomolecule amino_acid protein carbohydrate glucose iupac grignard aldol cannizzaro friedel nucleophile electrophile alkyl'};
+function guess(t,min){
+ t=' '+t.toLowerCase().replace(/[^a-z0-9\/\-\s]/g,' ').replace(/\s+/g,' ')+' ';
+ let best=null,bs=0;
+ for(const[k,v]of Object.entries(KW)){let n=0;for(const w of v.split(' ')){const x=' '+w.replace(/_/g,' ');if(t.includes(w.length>4?x:x+' '))n++}if(n>bs){bs=n;best=k}}
+ return bs>=min?best:null}
+let TW=null;
+async function ocr(src){
+ if(!window.Tesseract)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';s.onload=ok;s.onerror=no;document.head.appendChild(s)});
+ TW=TW||await Tesseract.createWorker('eng');
+ return (await TW.recognize(src)).data.text}
+async function auto(d,img){
+ const st=m=>{d.dt=m;const e=document.getElementById('det');if(e&&S.draft===d)e.textContent=m};
+ st('🔍 Detecting subject…');
+ let s=null;
+ try{s=guess(await ocr(img),2)}catch(e){}
+ if(!s)s=guess(d.title+' '+d.chapter+' '+d.notes,1);
+ if(d.manual)return st('');
+ if(s){d.subj=s;st('✨ Auto-detected: '+s+' (tap a subject to change)');if(S.draft===d)document.querySelectorAll('[data-a=ds]').forEach(c=>c.classList.toggle('on',c.dataset.v===s))}
+ else st('❓ Couldn’t tell the subject — please pick it')}
 
 openDB().then(load);
 try{navigator.storage.persist()}catch(e){}
